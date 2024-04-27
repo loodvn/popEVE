@@ -64,7 +64,7 @@ def s3_sync_folder(from_path, to_path, silent=False):
     else:
         raise error
 
-tier = 0
+tier = 1
 silent = False  # Debugging
 
 if tier == 0:
@@ -145,7 +145,6 @@ num_cpus = len(os.sched_getaffinity(0))
 print("Mapping file head:", mapping_df.head())
 
 with Pool(num_cpus) as pool:
-    # TODO temp using chunksize 1 
     results = tqdm(pool.imap_unordered(train_popeve, ((row.S3, row.protein_id, row.unique_id) for row in mapping_df.itertuples()), chunksize=1), total=len(mapping_df))
 
 all_unique_ids_successful = [r for r in results if r]

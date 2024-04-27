@@ -6,12 +6,13 @@ set -e
 sudo apt install tmux
 # Install Miniforge
 curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-$(uname)-$(uname -m).sh"
-bash Miniforge3-$(uname)-$(uname -m).sh
+bash Miniforge3-$(uname)-$(uname -m).sh -b  # -b for batch (non-interactive) install
 
 source ~/.bashrc  # To get Mamba in the namespace
 
 # Install GPyTorch
 mamba create -n popeve gpytorch pandas tqdm -c gpytorch  # Note: No version here 
+mamba activate popeve
 
 # AWS CLI
 sudo apt install unzip
