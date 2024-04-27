@@ -154,7 +154,7 @@ print(f"Using {num_cpus} CPUs.")
 print("Mapping file head:", mapping_df.head())
 
 with Pool(num_cpus) as pool:
-    results = tqdm(pool.imap_unordered(train_popeve, ((row.S3, row.protein_id, row.unique_id) for row in mapping_df.itertuples()), chunksize=1), total=len(mapping_df))
+    results = list(tqdm(pool.imap_unordered(train_popeve, ((row.S3, row.protein_id, row.unique_id) for row in mapping_df.itertuples()), chunksize=1), total=len(mapping_df)))
 
 all_unique_ids_successful = [r for r in results if r]
 print(f"{len(all_unique_ids_successful)} / {len(mapping_df)} successful")
