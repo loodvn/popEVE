@@ -65,6 +65,7 @@ def s3_sync_folder(from_path, to_path, silent=False):
         raise error
 
 tier = 0
+silent = False  # Debugging
 
 if tier == 0:
     # Testing
@@ -93,10 +94,12 @@ for dir in [losses_and_scales_directory, scores_directory, model_states_director
 
 def train_popeve(tup):  # Just passing in the tuple because too lazy to use starmap unordered
     training_data_file, protein_id, unique_id = tup
+    if not silent:
+        print(f"Starting {protein_id}")
     try:
-        s3_cp_file(f"s3://markslab-private/popEVE/{training_data_file}", f"/tmp/data/{training_data_file}", silent=True)
+        s3_cp_file(f"s3://markslab-private/popEVE/{training_data_file}", f"/tmp/data/{training_data_file}", silent=silent)
     except subprocess.CalledProcessError:
-        print("skipping {protein}")
+        print(f"Skipping {protein_id}")
         return
     
     # If we need to suppress outputs, we can use this
@@ -115,13 +118,13 @@ def train_popeve(tup):  # Just passing in the tuple because too lazy to use star
           states_directory=model_states_directory)
 
     # Copy results to s3
-    s3_cp_file(losses_and_scales_path, f"s3://markslab-private/popEVE/results/{run_name}/losses_and_lengthscales/{unique_id}_loss_lengthscale.csv", silent=True)
-    s3_cp_file(scores_path, f"s3://markslab-private/popEVE/results/{run_name}/scores/{unique_id}_scores.csv", silent=True)
+    s3_cp_file(losses_and_scales_path, f"s3://markslab-private/popEVE/results/{run_name}/losses_and_lengthscales/{unique_id}_loss_lengthscale.csv", silent=silent)
+    s3_cp_file(scores_path, f"s3://markslab-private/popEVE/results/{run_name}/scores/{unique_id}_scores.csv", silent=silent)
     
     # TODO could also just copy over the final checkpoint (unique_id + '_model_final.pth')
     checkpoints_to_copy = [f for f in os.listdir(model_states_directory) if unique_id in f and f.endswith(".pth")]
     for checkpoint_filename in checkpoints_to_copy:
-        s3_cp_file(f"{model_states_directory}/{checkpoint_filename}", f"s3://markslab-private/popEVE/results/{run_name}/model_states/{checkpoint_filename}", silent=True)
+        s3_cp_file(f"{model_states_directory}/{checkpoint_filename}", f"s3://markslab-private/popEVE/results/{run_name}/model_states/{checkpoint_filename}", silent=silent)
     
     # Clean up afterwards
     os.remove(f"/tmp/data/{training_data_file}")
@@ -142,7 +145,8 @@ num_cpus = len(os.sched_getaffinity(0))
 print("Mapping file head:", mapping_df.head())
 
 with Pool(num_cpus) as pool:
-    results = tqdm(pool.imap_unordered(train_popeve, ((row.S3, row.protein_id, row.unique_id) for row in mapping_df.itertuples()), chunksize=10), total=len(mapping_df))
+    # TODO temp using chunksize 1 
+    results = tqdm(pool.imap_unordered(train_popeve, ((row.S3, row.protein_id, row.unique_id) for row in mapping_df.itertuples()), chunksize=1), total=len(mapping_df))
 
 all_unique_ids_successful = [r for r in results if r]
 print(f"{len(all_unique_ids_successful)} / {len(mapping_df)} successful")
