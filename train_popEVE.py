@@ -49,7 +49,7 @@ def main(mapping_file, gene_index, losses_dir, scores_dir, model_states_dir, see
     train(training_data_df, protein_id, unique_id, losses_and_scales_path, scores_path, states_directory, seed)
     
     
-def train(training_data_df, protein_id, unique_id, losses_and_scales_path, scores_path, states_directory, seed=42):
+def train(training_data_df, protein_id, unique_id, losses_and_scales_path, scores_path, states_directory, seed=42, debug=False):
     train_x, train_y, train_variants, heldout_x, heldout_y, heldout_variants, X_min, X_max = get_training_and_holdout_data_from_processed_file(training_data_df, device = device)
 
     unique_train_output = train_y.unique(return_counts = True)

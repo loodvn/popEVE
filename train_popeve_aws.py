@@ -72,7 +72,6 @@ if tier == 0:
     mapping_file_name = "example_mapping.csv"
     mapping_df = pd.read_csv(mapping_file_name)
     run_name = "example_mapping"
-
 # popEVE rerun with various small changes
 elif tier == 1:
     # s3_cp_file("s3://markslab-us-east-2/colabfold/output/popeve/missing_genes_with_priority.tsv", ".")
@@ -81,6 +80,7 @@ elif tier == 1:
     mapping_file_name = "mapping_benchmarking_EVE_20240427.csv"
     mapping_df = pd.read_csv(mapping_file_name)
     run_name = "mapping_benchmarking_EVE_20240427"
+
 
 results_directory = f"/tmp/results/{run_name}/"
 os.makedirs(results_directory, exist_ok=True)
@@ -96,8 +96,9 @@ def train_popeve(tup):  # Just passing in the tuple because too lazy to use star
     training_data_file, protein_id, unique_id = tup
     if not silent:
         print(f"Starting {protein_id}")
+    training_data_file_local_path = f"/tmp/data/{training_data_file.replace('.csv', f'{unique_id}.csv')})"  # Ensure each process reads/writes a unique file. This might copy over a lot of redundant files
     try:
-        s3_cp_file(f"s3://markslab-private/popEVE/{training_data_file}", f"/tmp/data/{training_data_file}", silent=silent)
+        s3_cp_file(f"s3://markslab-private/popEVE/{training_data_file}", training_data_file_local_path, silent=silent)
     except subprocess.CalledProcessError:
         print(f"Skipping {protein_id}")
         return
@@ -109,14 +110,20 @@ def train_popeve(tup):  # Just passing in the tuple because too lazy to use star
     losses_and_scales_path = losses_and_scales_directory + unique_id + '_loss_lengthscale.csv'
     scores_path = scores_directory + unique_id + '_scores.csv'
     
-    training_data_df = pd.read_csv(f"/tmp/data/{training_data_file}")
+    if not silent:
+        print("Copied file, reading in")
+    
+    training_data_df = pd.read_csv(training_data_file_local_path)
+    if not silent:
+        print("Read in file, training")
     train(training_data_df=training_data_df, 
           protein_id=protein_id, 
           unique_id=unique_id, 
           losses_and_scales_path=losses_and_scales_path, 
           scores_path=scores_path,
           states_directory=model_states_directory)
-
+    if not silent:
+        print("Done with training, copying results")
     # Copy results to s3
     s3_cp_file(losses_and_scales_path, f"s3://markslab-private/popEVE/results/{run_name}/losses_and_lengthscales/{unique_id}_loss_lengthscale.csv", silent=silent)
     s3_cp_file(scores_path, f"s3://markslab-private/popEVE/results/{run_name}/scores/{unique_id}_scores.csv", silent=silent)
@@ -127,7 +134,7 @@ def train_popeve(tup):  # Just passing in the tuple because too lazy to use star
         s3_cp_file(f"{model_states_directory}/{checkpoint_filename}", f"s3://markslab-private/popEVE/results/{run_name}/model_states/{checkpoint_filename}", silent=silent)
     
     # Clean up afterwards
-    os.remove(f"/tmp/data/{training_data_file}")
+    os.remove(training_data_file_local_path)
     os.remove(losses_and_scales_path)
     os.remove(scores_path)
     for checkpoint_filename in checkpoints_to_copy:
@@ -140,7 +147,9 @@ def train_popeve(tup):  # Just passing in the tuple because too lazy to use star
 
 # Simple: One parallelisation run for a given setup (so only one results folder)
 # Iterate over dataframe, get tuples, pass to function
+print("Run name: ", run_name)
 num_cpus = len(os.sched_getaffinity(0))
+print(f"Using {num_cpus} CPUs.")
 
 print("Mapping file head:", mapping_df.head())
 
@@ -152,7 +161,8 @@ print(f"{len(all_unique_ids_successful)} / {len(mapping_df)} successful")
 # print(all_unique_ids_successful)  # Around 20k max
 with open(f"{run_name}_successful.txt", "w") as f:
     f.write("\n".join(all_unique_ids_successful))
-s3_cp_file(f"{run_name}_successful.txt", f"s3://markslab-private/popEVE/results/{run_name}/successful.txt", silent=True)
+s3_cp_file(f"{run_name}_successful.txt", f"s3://markslab-private/popEVE/results/{run_name}/successful.txt", silent=False)
+print("Done")
     
 
 # for run_name in run_names:
