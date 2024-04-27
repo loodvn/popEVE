@@ -91,7 +91,8 @@ for dir in [losses_and_scales_directory, scores_directory, model_states_director
     os.makedirs(dir, exist_ok=True)
 
 
-def train_popeve(training_data_file, protein_id, unique_id):
+def train_popeve(tup):  # Just passing in the tuple because too lazy to use starmap unordered
+    training_data_file, protein_id, unique_id = tup
     try:
         s3_cp_file(f"s3://markslab-private/popEVE/{training_data_file}", f"/tmp/data/{training_data_file}", silent=True)
     except subprocess.CalledProcessError:
@@ -137,8 +138,9 @@ def train_popeve(training_data_file, protein_id, unique_id):
 # Simple: One parallelisation run for a given setup (so only one results folder)
 # Iterate over dataframe, get tuples, pass to function
 num_cpus = len(os.sched_getaffinity(0))
+
 with Pool(num_cpus) as pool:
-    results = tqdm(pool.imap_unordered(train_popeve, ((row.protein_id, row.unique_id) for row in mapping_df.itertuples()), chunksize=10), total=len(mapping_df))
+    results = tqdm(pool.imap_unordered(train_popeve, ((row.S3, row.protein_id, row.unique_id) for row in mapping_df.itertuples()), chunksize=10), total=len(mapping_df))
 
 all_unique_ids_successful = [r for r in results if r]
 print(f"{len(all_unique_ids_successful)} / {len(mapping_df)} successful")
