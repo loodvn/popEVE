@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # Add line here to activate conda environment, or make sure to activate conda environment before running this script.
+conda activate 
 
 export mapping_file='example_mapping.csv'
 export losses_and_lengthscales_directory='./results/losses_and_lengthscales/'

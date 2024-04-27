@@ -11,7 +11,7 @@ import gpytorch
 from tqdm import trange
 
 from popEVE.popEVE import PGLikelihood, GPModel
-from utils.helpers import *
+from utils.helpers import get_training_and_holdout_data_from_processed_file, get_scores
 
 if torch.cuda.is_available():
     print("GPU is available!")
@@ -20,32 +20,42 @@ else:
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 print("Device:", device)
-    
-    
-if __name__=='__main__':
+
+def parse_args():
     parser = argparse.ArgumentParser(description='VAE')
     parser.add_argument('--mapping_file', type=str, help='List of genes and corresponding training data file path')
     parser.add_argument('--gene_index', type=int, help='Row index of gene in gene_list')
     parser.add_argument('--losses_dir', type=str, help='File path for saving losses and lengthscales')
     parser.add_argument('--scores_dir', type=str, help='File path for saving scores')
     parser.add_argument('--model_states_dir', type=str, help='File path for model states')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--seed', type=int, default=42, help='Random seed')  
+    # TODO add nogpu or something to ensure we're being explicit about GPU
     args = parser.parse_args()
+    return args
+
+def main(mapping_file, gene_index, losses_dir, scores_dir, model_states_dir, seed=42, file_path_column_name="file_path"):
+    df_mapping = pd.read_csv(mapping_file)
+    protein_id = df_mapping['protein_id'][gene_index]
+    unique_id = df_mapping['unique_id'][gene_index]
+    training_data_df = pd.read_csv(df_mapping[file_path_column_name][gene_index])
     
-    mapping_file = pd.read_csv(args.mapping_file)
-    pid = mapping_file['protein_id'][args.gene_index]
-    unique_id = mapping_file['unique_id'][args.gene_index]
-    training_data_df = pd.read_csv(mapping_file['file_path'][args.gene_index])
-    losses_and_scales_directory = args.losses_dir
-    scores_directory = args.scores_dir
-    states_directory = args.model_states_dir
+    losses_and_scales_directory = losses_dir
+    scores_directory = scores_dir
+    states_directory = model_states_dir
     
+    losses_and_scales_path = losses_and_scales_directory + unique_id + '_loss_lengthscale.csv'
+    scores_path = scores_directory + unique_id + '_scores.csv'
+    
+    train(training_data_df, protein_id, unique_id, losses_and_scales_path, scores_path, states_directory, seed)
+    
+    
+def train(training_data_df, protein_id, unique_id, losses_and_scales_path, scores_path, states_directory, seed=42):
     train_x, train_y, train_variants, heldout_x, heldout_y, heldout_variants, X_min, X_max = get_training_and_holdout_data_from_processed_file(training_data_df, device = device)
 
     unique_train_output = train_y.unique(return_counts = True)
     unique_test_output = heldout_y.unique(return_counts = True)
-    print(f"pid = {pid}")
-    print(f"Tain: y unique = {unique_train_output[0]}, y counts = {unique_train_output[1]}")
+    print(f"Protein ID = {protein_id}")
+    print(f"Train: y unique = {unique_train_output[0]}, y counts = {unique_train_output[1]}")
     print(f"Holdout: y unique = {unique_test_output[0]}, y counts = {unique_test_output[1]}")
 
     # Initialize the model with M = 20 inducing points
@@ -115,18 +125,20 @@ if __name__=='__main__':
 
         # Save model every 1000 epochs
         if not i % 1000:
-            model_state_path = './results/states/' + unique_id + '_model_' + str(i) + '.pth'
+            model_state_path = f"{states_directory}/{unique_id}_model_{str(i)}.pth"
             torch.save(model.state_dict(), model_state_path)
 
     # Save final model
-    model_state_path = './results/states/' + unique_id + '_model_final.pth'
-    torch.save(model.state_dict(), model_state_path)
+    model_final_checkpoint = f"{states_directory}/{unique_id}_model_final.pth"
+    torch.save(model.state_dict(), model_final_checkpoint)
 
     # Save loss and correlation length info
-    losses_and_scales_path = './results/losses_and_lengthscales/' + unique_id + '_loss_lengthscale.csv'
     pd.DataFrame({'loss': losses, 'lengthscale': lengthscales}).to_csv(losses_and_scales_path, index = False)
 
     # Compute scores for every possible single amino acid substitution
     scores_df = get_scores(model, train_x, train_variants, sample_size = 10**3)
-    scores_path = './results/scores/' + unique_id + '_scores.csv'
     scores_df.to_csv(scores_path, index = False)
+
+if __name__=='__main__':
+    args = parse_args()
+    main(**args.__dict__)
