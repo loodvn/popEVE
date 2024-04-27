@@ -139,6 +139,8 @@ def train_popeve(tup):  # Just passing in the tuple because too lazy to use star
 # Iterate over dataframe, get tuples, pass to function
 num_cpus = len(os.sched_getaffinity(0))
 
+print("Mapping file head:", mapping_df.head())
+
 with Pool(num_cpus) as pool:
     results = tqdm(pool.imap_unordered(train_popeve, ((row.S3, row.protein_id, row.unique_id) for row in mapping_df.itertuples()), chunksize=10), total=len(mapping_df))
 
