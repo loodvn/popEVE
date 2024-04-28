@@ -9,6 +9,7 @@ from contextlib import contextmanager,redirect_stderr,redirect_stdout
 import pandas as pd
 from tqdm.auto import tqdm
 from multiprocessing import Pool
+import torch
 
 sys.path.append("/home/ubuntu/popEVE/")
 from train_popEVE import train
@@ -80,6 +81,14 @@ elif tier == 1:
     mapping_file_name = "mapping_benchmarking_EVE_20240427.csv"
     mapping_df = pd.read_csv(mapping_file_name)
     run_name = "mapping_benchmarking_EVE_20240427"
+elif tier == 2:
+    print("Not implemented")
+    exit()
+elif tier == 3:
+    # 3a 
+    mapping_file_name = "mapping_snv_gf_EVE_benchmarking_20240427.csv"
+    run_name = "mapping_snv_gf_EVE_benchmarking_20240427"
+    mapping_df = pd.read_csv(mapping_file_name)
 
 
 results_directory = f"/tmp/results/{run_name}/"
@@ -109,6 +118,7 @@ def train_popeve(tup):  # Just passing in the tuple because too lazy to use star
     
     losses_and_scales_path = losses_and_scales_directory + unique_id + '_loss_lengthscale.csv'
     scores_path = scores_directory + unique_id + '_scores.csv'
+    # TODO skip existing files on s3, to avoid overwriting
     
     if not silent:
         print("Copied file, reading in")
@@ -116,6 +126,9 @@ def train_popeve(tup):  # Just passing in the tuple because too lazy to use star
     training_data_df = pd.read_csv(training_data_file_local_path)
     if not silent:
         print("Read in file, training")
+    
+    torch.set_num_threads(1)  # Avoid CPU oversubscription https://pytorch.org/docs/stable/notes/multiprocessing.html#cpu-in-multiprocessing
+    # If this remains a problem, we can also manually set the device to be the specific CPU of the worker (in case that's a problem)
     train(training_data_df=training_data_df, 
           protein_id=protein_id, 
           unique_id=unique_id, 
@@ -128,7 +141,7 @@ def train_popeve(tup):  # Just passing in the tuple because too lazy to use star
     s3_cp_file(losses_and_scales_path, f"s3://markslab-private/popEVE/results/{run_name}/losses_and_lengthscales/{unique_id}_loss_lengthscale.csv", silent=silent)
     s3_cp_file(scores_path, f"s3://markslab-private/popEVE/results/{run_name}/scores/{unique_id}_scores.csv", silent=silent)
     
-    # TODO could also just copy over the final checkpoint (unique_id + '_model_final.pth')
+    # Note: could also just copy over the final checkpoint (unique_id + '_model_final.pth')
     checkpoints_to_copy = [f for f in os.listdir(model_states_directory) if unique_id in f and f.endswith(".pth")]
     for checkpoint_filename in checkpoints_to_copy:
         s3_cp_file(f"{model_states_directory}/{checkpoint_filename}", f"s3://markslab-private/popEVE/results/{run_name}/model_states/{checkpoint_filename}", silent=silent)

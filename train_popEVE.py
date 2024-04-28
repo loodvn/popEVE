@@ -9,6 +9,7 @@ import torch
 import pandas as pd
 import gpytorch
 from tqdm import trange
+import time
 
 from popEVE.popEVE import PGLikelihood, GPModel
 from utils.helpers import get_training_and_holdout_data_from_processed_file, get_scores
@@ -29,11 +30,13 @@ def parse_args():
     parser.add_argument('--scores_dir', type=str, help='File path for saving scores')
     parser.add_argument('--model_states_dir', type=str, help='File path for model states')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')  
+    parser.add_argument('--debug', action='store_true', help='Debug mode')
+    parser.add_argument('--skip_slow', type=int, default=0, help='Skip any processes that would take more than X hours to run.')
     # TODO add nogpu or something to ensure we're being explicit about GPU
     args = parser.parse_args()
     return args
 
-def main(mapping_file, gene_index, losses_dir, scores_dir, model_states_dir, seed=42, file_path_column_name="file_path"):
+def main(mapping_file, gene_index, losses_dir, scores_dir, model_states_dir, seed=42, file_path_column_name="file_path", debug=False, skip_slow=0):
     df_mapping = pd.read_csv(mapping_file)
     protein_id = df_mapping['protein_id'][gene_index]
     unique_id = df_mapping['unique_id'][gene_index]
@@ -46,10 +49,17 @@ def main(mapping_file, gene_index, losses_dir, scores_dir, model_states_dir, see
     losses_and_scales_path = losses_and_scales_directory + unique_id + '_loss_lengthscale.csv'
     scores_path = scores_directory + unique_id + '_scores.csv'
     
-    train(training_data_df, protein_id, unique_id, losses_and_scales_path, scores_path, states_directory, seed)
+    success, reason = train(training_data_df, protein_id, unique_id, losses_and_scales_path, scores_path, states_directory, seed, debug, skip_slow)
+    if not success:
+        if debug:
+            print(reason)
+        # Write out a .failed file (basically 'touch')
+        with open(f"{scores_directory}/{unique_id}.failed", "a") as f:
+            f.write(reason) # Useful to record so that we can go back and check specifically for this unique ID
+    print("Done")
     
     
-def train(training_data_df, protein_id, unique_id, losses_and_scales_path, scores_path, states_directory, seed=42, debug=False):
+def train(training_data_df, protein_id, unique_id, losses_and_scales_path, scores_path, states_directory, seed=42, debug=False, skip_slow=0, device=device):
     train_x, train_y, train_variants, heldout_x, heldout_y, heldout_variants, X_min, X_max = get_training_and_holdout_data_from_processed_file(training_data_df, device = device)
 
     unique_train_output = train_y.unique(return_counts = True)
@@ -102,9 +112,13 @@ def train(training_data_df, protein_id, unique_id, losses_and_scales_path, score
     # Lists to store losses and lengthscales for analysis
     losses = []
     lengthscales = []
+    
+    skip_duration = skip_slow * 60*60 / num_epochs   # e.g. if 1 hour is the minimum, then skip all processes that have a speed of > 3600/6000 = 0.6 seconds per epoch
 
     # Training loop
     for i in epochs_iter:
+        if skip_slow > 0 and i == 1:
+            start_time = time.perf_counter()
         # Perform NGD step to optimize variational parameters and hyperparameters
         variational_ngd_optimizer.zero_grad()
         hyperparameter_optimizer.zero_grad()
@@ -123,8 +137,13 @@ def train(training_data_df, protein_id, unique_id, losses_and_scales_path, score
         lengthscale = model.covar_module.base_kernel.lengthscale.item()
         lengthscales.append(lengthscale)
 
+        if skip_duration > 0 and i == 1:
+            elapsed = time.perf_counter() - start_time
+            if elapsed > skip_duration:
+                print(f"{protein_id} too slow. Time elapsed in second loop = {elapsed:.2f}s > {skip_duration:.2f}s (i.e. would take over {skip_slow} hours). Quitting.")
+                return False, f"Slow.{elapsed:.2f}"
         # Save model every 1000 epochs
-        if not i % 1000:
+        if i % 1000 == 0 and i != 0:
             model_state_path = f"{states_directory}/{unique_id}_model_{str(i)}.pth"
             torch.save(model.state_dict(), model_state_path)
 
@@ -138,6 +157,8 @@ def train(training_data_df, protein_id, unique_id, losses_and_scales_path, score
     # Compute scores for every possible single amino acid substitution
     scores_df = get_scores(model, train_x, train_variants, sample_size = 10**3)
     scores_df.to_csv(scores_path, index = False)
+    
+    return True, ""
 
 if __name__=='__main__':
     args = parse_args()
