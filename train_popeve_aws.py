@@ -110,7 +110,7 @@ def train_popeve(tup):  # Just passing in the tuple because too lazy to use star
         s3_cp_file(f"s3://markslab-private/popEVE/{training_data_file}", training_data_file_local_path, silent=silent)
     except subprocess.CalledProcessError:
         print(f"Skipping {protein_id}")
-        return
+        return {"unique_id": unique_id, "result": False, "reason": "Copy error"}
     
     # If we need to suppress outputs, we can use this
     # with suppress_stdout_stderr():

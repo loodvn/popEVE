@@ -21,3 +21,5 @@ unzip awscliv2.zip
 sudo ./aws/install
 
 # Test: aws s3 ls s3://markslab/
+
+aws configure set default.s3.max_concurrent_requests 100
