@@ -129,33 +129,39 @@ def train_popeve(tup):  # Just passing in the tuple because too lazy to use star
     
     torch.set_num_threads(1)  # Avoid CPU oversubscription https://pytorch.org/docs/stable/notes/multiprocessing.html#cpu-in-multiprocessing
     # If this remains a problem, we can also manually set the device to be the specific CPU of the worker (in case that's a problem)
-    train(training_data_df=training_data_df, 
+    result, reason = train(training_data_df=training_data_df, 
           protein_id=protein_id, 
           unique_id=unique_id, 
           losses_and_scales_path=losses_and_scales_path, 
           scores_path=scores_path,
           states_directory=model_states_directory)
-    if not silent:
-        print("Done with training, copying results")
-    # Copy results to s3
-    s3_cp_file(losses_and_scales_path, f"s3://markslab-private/popEVE/results/{run_name}/losses_and_lengthscales/{unique_id}_loss_lengthscale.csv", silent=silent)
-    s3_cp_file(scores_path, f"s3://markslab-private/popEVE/results/{run_name}/scores/{unique_id}_scores.csv", silent=silent)
     
-    # Note: could also just copy over the final checkpoint (unique_id + '_model_final.pth')
-    checkpoints_to_copy = [f for f in os.listdir(model_states_directory) if unique_id in f and f.endswith(".pth")]
-    for checkpoint_filename in checkpoints_to_copy:
-        s3_cp_file(f"{model_states_directory}/{checkpoint_filename}", f"s3://markslab-private/popEVE/results/{run_name}/model_states/{checkpoint_filename}", silent=silent)
+    if not result:
+        if not silent:
+            print(f"Failed {unique_id}: {reason}")
+    if not silent:
+        print(f"Finished {unique_id}")
+    
+    # Copy results to s3
+    if result:
+        s3_cp_file(losses_and_scales_path, f"s3://markslab-private/popEVE/results/{run_name}/losses_and_lengthscales/{unique_id}_loss_lengthscale.csv", silent=silent)
+        s3_cp_file(scores_path, f"s3://markslab-private/popEVE/results/{run_name}/scores/{unique_id}_scores.csv", silent=silent)
+        # Note: could also just copy over the final checkpoint (unique_id + '_model_final.pth')
+        checkpoints_to_copy = [f for f in os.listdir(model_states_directory) if unique_id in f and f.endswith(".pth")]
+        for checkpoint_filename in checkpoints_to_copy:
+            s3_cp_file(f"{model_states_directory}/{checkpoint_filename}", f"s3://markslab-private/popEVE/results/{run_name}/model_states/{checkpoint_filename}", silent=silent)
     
     # Clean up afterwards
-    os.remove(training_data_file_local_path)
-    os.remove(losses_and_scales_path)
-    os.remove(scores_path)
+    for file in [training_data_file_local_path, losses_and_scales_path, scores_path]:
+        if os.path.isfile(file):  # For incomplete runs these might not exist
+            os.remove(file)
+    
     for checkpoint_filename in checkpoints_to_copy:
         os.remove(f"{model_states_directory}/{checkpoint_filename}")
     
-    print(unique_id)
+    result_dict = {"unique_id": unique_id, "result": result, "reason": reason}
     
-    return unique_id
+    return result_dict
 
 
 # Simple: One parallelisation run for a given setup (so only one results folder)
@@ -169,12 +175,15 @@ print("Mapping file head:", mapping_df.head())
 with Pool(num_cpus) as pool:
     results = list(tqdm(pool.imap_unordered(train_popeve, ((row.S3, row.protein_id, row.unique_id) for row in mapping_df.itertuples()), chunksize=1), total=len(mapping_df)))
 
-all_unique_ids_successful = [r for r in results if r]
-print(f"{len(all_unique_ids_successful)} / {len(mapping_df)} successful")
-# print(all_unique_ids_successful)  # Around 20k max
-with open(f"{run_name}_successful.txt", "w") as f:
-    f.write("\n".join(all_unique_ids_successful))
-s3_cp_file(f"{run_name}_successful.txt", f"s3://markslab-private/popEVE/results/{run_name}/successful.txt", silent=False)
+df_results = pd.DataFrame(results)
+df_results.to_csv(f"{scores_directory}/results_aws.csv", index=False)
+
+# all_unique_ids_successful = [r for r in results if r]
+# print(f"{len(all_unique_ids_successful)} / {len(mapping_df)} successful")
+# # print(all_unique_ids_successful)  # Around 20k max
+# with open(f"{run_name}_successful.txt", "w") as f:
+#     f.write("\n".join(all_unique_ids_successful))
+# s3_cp_file(f"{run_name}_successful.txt", f"s3://markslab-private/popEVE/results/{run_name}/successful.txt", silent=False)
 print("Done")
     
 
